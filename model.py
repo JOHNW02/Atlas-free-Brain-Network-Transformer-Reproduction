@@ -9,8 +9,8 @@ class AtlasFreeBNT(nn.Module):
                  stride=3,
                  n_heads=4,
                  n_layers=2,
-                 ff_mult=4,
-                 dropout=0.1
+                 ff_mult=2,
+                 dropout=0.2
                  ):
         super().__init__()
         self.roi_in_dim = roi_in_dim
@@ -34,18 +34,18 @@ class AtlasFreeBNT(nn.Module):
 
         self.enc_layer = nn.TransformerEncoderLayer(
             d_model=roi_embed_dim,
-            nheads=self.n_heads,
+            nhead=self.n_heads,
             dim_feedforward=roi_embed_dim * ff_mult,
             dropout=self.dropout,
             activation="gelu",
             batch_first=True,
-            norm_first=True,
+           # norm_first=True,
         )        
 
         self.encoder = nn.TransformerEncoder(encoder_layer=self.enc_layer,
                                              num_layers=self.n_layers)
         self.out_norm = nn.LayerNorm(roi_embed_dim)
-        self.classifier = nn.Linear(roi_embed_dim, 1)
+        self.classifier = nn.Linear(roi_embed_dim, 2)
         
     
     def brain_map(self, C, Q):

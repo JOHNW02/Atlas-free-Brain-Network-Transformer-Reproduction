@@ -28,7 +28,7 @@ import scipy.io as sio
 
 from sklearn.model_selection import train_test_split
 from model import AtlasFreeBNT
-
+from collections import Counter
 # ---- import your dataset + model ----
 # from dataset import AtlasFreeBNTDataset
 # from model import AtlasFreeBNT
@@ -36,6 +36,17 @@ from model import AtlasFreeBNT
 # If you already have AtlasFreeBNTDataset in the same file, remove this import line.
 from dataset import AtlasFreeBNTDataset
 
+def get_valid_subjects(root_dir, subject_ids):
+    valid = []
+    for sid in subject_ids:
+        f_path = os.path.join(root_dir, f"s_{sid}_feature.mat")
+        f = sio.loadmat(f_path)["feature_mat"]
+
+        if f.shape[0] == 400:
+            valid.append(sid)
+        else:
+            print(f"[SKIP] subject {sid}: feature shape {f.shape}")
+    return np.array(valid, dtype=np.int64)
 
 def seed_everything(seed: int = 42):
     random.seed(seed)
@@ -73,32 +84,35 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_dir", type=str, required=True)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
     seed_everything(args.seed)
     device = torch.device(args.device)
 
+
+
     # ---- Load labels only (for stratification) ----
     label_path = os.path.join(args.data_dir, "label.mat")
     label_mat = sio.loadmat(label_path)
     # class labels -> 0-based
+
     Y = np.squeeze(label_mat["label"]).astype(np.int64) - 1  # shape [N]
 
-    # subject ids start at 1, so indices are 1..N
-    N = len(Y)
-    all_sids = np.arange(1, N + 1, dtype=int)
+    all_subjects = np.arange(1, len(Y)+1)  # subject IDs are 1-based
+    valid_sids = get_valid_subjects(args.data_dir, all_subjects)
+    #Y_valid = Y[valid_sids - 1] 
 
     # ---- Stratified split: train (0.70), remaining (0.30) ----
     train_sids, rem_sids = train_test_split(
-        all_sids,
+        valid_sids,
         test_size=0.30,
         random_state=args.seed,
         shuffle=True,
-        stratify=Y,  # stratify by class labels
+        stratify=Y[valid_sids - 1],  # stratify by class labels
     )
 
     # ---- Split remaining into test and heldout equally (0.15/0.15 of full) ----
@@ -115,9 +129,9 @@ def main():
     print(f"Split sizes: train={len(train_sids)}, test={len(test_sids)}, heldout={len(heldout_sids)}")
 
     # ---- Build datasets/loaders ----
-    train_ds = AtlasFreeBNTDataset(args.data_dir, train_sids, label_mat_name=args.label_mat_name)
-    test_ds = AtlasFreeBNTDataset(args.data_dir, test_sids, label_mat_name=args.label_mat_name)
-    heldout_ds = AtlasFreeBNTDataset(args.data_dir, heldout_sids, label_mat_name=args.label_mat_name)
+    train_ds = AtlasFreeBNTDataset(args.data_dir,Y, train_sids)
+    test_ds = AtlasFreeBNTDataset(args.data_dir, Y, test_sids)
+    heldout_ds = AtlasFreeBNTDataset(args.data_dir,Y, heldout_sids)
 
     train_loader = DataLoader(
         train_ds, batch_size=args.batch_size, shuffle=True, pin_memory=True)
@@ -125,9 +139,7 @@ def main():
     test_loader = DataLoader(
         test_ds, batch_size=args.batch_size, shuffle=False, pin_memory=True)
     heldout_loader = DataLoader(
-        heldout_ds, batch_size=args.batch_size, shuffle=False,
-        num_workers=args.num_workers, pin_memory=True
-    )
+        heldout_ds, batch_size=args.batch_size, shuffle=False, pin_memory=True)
 
     # ---- Create model ----
     # Replace this with your actual import / constructor
