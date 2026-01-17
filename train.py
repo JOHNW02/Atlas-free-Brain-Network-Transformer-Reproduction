@@ -84,8 +84,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_dir", type=str, required=True)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--batch_size", type=int, default=10)
     parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
@@ -149,6 +149,11 @@ def main():
     # ---- Train setup ----
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-2)
+    scheduler = torch.optim.lr_scheduler.StepLR(
+                                                optimizer,
+                                                step_size=2,   # every 2 epochs
+                                                gamma=0.1      # multiply LR by 0.5
+                                                )  
 
     best_test_acc = -1.0
 
@@ -203,6 +208,7 @@ def main():
             f"test loss {test_loss:.4f} acc {test_acc:.4f} | "
             f"best test acc {best_test_acc:.4f}"
         )
+        scheduler.step()
 
     # ---- Final evaluation on heldout using best checkpoint ----
     ckpt = torch.load("best_checkpoint.pt", map_location=device)

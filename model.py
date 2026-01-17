@@ -6,10 +6,10 @@ class AtlasFreeBNT(nn.Module):
                  roi_in_dim=1632,
                  roi_embed_dim=256,
                  K=3,
-                 stride=3,
+                 stride=2,
                  n_heads=4,
-                 n_layers=2,
-                 ff_mult=2,
+                 n_layers=1,
+                 ff_mult=4,
                  dropout=0.2
                  ):
         super().__init__()
@@ -39,7 +39,7 @@ class AtlasFreeBNT(nn.Module):
             dropout=self.dropout,
             activation="gelu",
             batch_first=True,
-           # norm_first=True,
+            #norm_first=True,
         )        
 
         self.encoder = nn.TransformerEncoder(encoder_layer=self.enc_layer,
