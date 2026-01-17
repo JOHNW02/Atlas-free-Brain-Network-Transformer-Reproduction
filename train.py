@@ -29,6 +29,7 @@ import scipy.io as sio
 from sklearn.model_selection import train_test_split
 from model import AtlasFreeBNT
 from collections import Counter
+import json
 # ---- import your dataset + model ----
 # from dataset import AtlasFreeBNTDataset
 # from model import AtlasFreeBNT
@@ -132,6 +133,7 @@ def main():
     train_ds = AtlasFreeBNTDataset(args.data_dir,Y, train_sids)
     test_ds = AtlasFreeBNTDataset(args.data_dir, Y, test_sids)
     heldout_ds = AtlasFreeBNTDataset(args.data_dir,Y, heldout_sids)
+    print("datasets created..")
 
     train_loader = DataLoader(
         train_ds, batch_size=args.batch_size, shuffle=True, pin_memory=True)
@@ -141,22 +143,26 @@ def main():
     heldout_loader = DataLoader(
         heldout_ds, batch_size=args.batch_size, shuffle=False, pin_memory=True)
 
+    print("dataloaders created..")
     # ---- Create model ----
     # Replace this with your actual import / constructor
 
     model = AtlasFreeBNT().to(device)
-
+    print("model initialized..")
     # ---- Train setup ----
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-2)
     scheduler = torch.optim.lr_scheduler.StepLR(
                                                 optimizer,
-                                                step_size=2,   # every 2 epochs
+                                                step_size=30,   # every 2 epochs
                                                 gamma=0.1      # multiply LR by 0.5
                                                 )  
 
     best_test_acc = -1.0
-
+    lowest_loss = 999999.0
+    training_losses = []
+    testing_losses = []
+    print("start training...")
     for epoch in range(1, args.epochs + 1):
         model.train()
         running_loss = 0.0
@@ -184,8 +190,12 @@ def main():
 
         test_loss, test_acc = evaluate(model, test_loader, device)
 
-        if test_acc > best_test_acc:
+        training_losses.append(train_loss)
+        testing_losses.append(test_loss)
+
+        if test_loss < lowest_loss:
             best_test_acc = test_acc
+            lowest_loss = test_loss
             torch.save(
                 {
                     "epoch": epoch,
@@ -209,6 +219,12 @@ def main():
             f"best test acc {best_test_acc:.4f}"
         )
         scheduler.step()
+
+    with open("loss_log.json", "w") as f:
+        json.dump({
+            "train": training_losses,
+            "test": testing_losses
+        }, f)
 
     # ---- Final evaluation on heldout using best checkpoint ----
     ckpt = torch.load("best_checkpoint.pt", map_location=device)

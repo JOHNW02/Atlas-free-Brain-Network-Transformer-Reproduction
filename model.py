@@ -42,8 +42,13 @@ class AtlasFreeBNT(nn.Module):
             #norm_first=True,
         )        
 
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, roi_embed_dim))
+        # initialize CLS token
+        nn.init.trunc_normal_(self.cls_token, std=0.02)
+
         self.encoder = nn.TransformerEncoder(encoder_layer=self.enc_layer,
                                              num_layers=self.n_layers)
+                                             
         self.out_norm = nn.LayerNorm(roi_embed_dim)
         self.classifier = nn.Linear(roi_embed_dim, 2)
         
@@ -73,14 +78,19 @@ class AtlasFreeBNT(nn.Module):
 
         pooled = self.sumpool3d(Brain_Map).flatten(2).transpose(1,2)
 
-        X = self.encoder(pooled)
+        cls_token = self.cls_token.expand(pooled.size(0), -1, -1)      # [B, 1, V]
+        tokens = torch.cat([cls_token, pooled], dim=1)   # [B, 1+U, V]
+
+        X = self.encoder(tokens)
 
         X = self.out_norm(X)
 
         # subject-level feature vector
-        X = X.mean(dim=1)
+        #X = X.mean(dim=1)
+        X_cls = X[:, 0, :]
 
-        logits = self.classifier(X)
+        logits = self.classifier(X_cls)
+        #logits = self.classifier(X)
 
         return logits
 
