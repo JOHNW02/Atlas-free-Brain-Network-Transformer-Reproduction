@@ -1,21 +1,3 @@
-"""
-Simple training script for AtlasFreeBNT.
-
-Assumption (because 0.7/0.3/0.3 doesn't sum to 1):
-- Train = 0.70
-- Test = 0.15
-- Heldout = 0.15
-(all splits are stratified by class label)
-
-Usage:
-  python train_atlasfreebnt.py --data_dir /path/to/mats --epochs 30 --batch_size 4
-
-Folder expected to contain:
-  label_mat.mat  (with key "label")
-  s_{sid}_cluster_index.mat (key "cluster_index_mat")
-  s_{sid}_feature.mat       (key "feature_mat")
-"""
-
 import os
 import random
 import argparse
@@ -30,13 +12,9 @@ from sklearn.model_selection import train_test_split
 from model import AtlasFreeBNT
 from collections import Counter
 import json
-# ---- import your dataset + model ----
-# from dataset import AtlasFreeBNTDataset
-# from model import AtlasFreeBNT
-
-# If you already have AtlasFreeBNTDataset in the same file, remove this import line.
 from dataset import AtlasFreeBNTDataset
 
+## Helper function: filter out data that only has 399 features
 def get_valid_subjects(root_dir, subject_ids):
     valid = []
     for sid in subject_ids:
@@ -49,13 +27,15 @@ def get_valid_subjects(root_dir, subject_ids):
             print(f"[SKIP] subject {sid}: feature shape {f.shape}")
     return np.array(valid, dtype=np.int64)
 
+## Help function: set random seed
 def seed_everything(seed: int = 42):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
-
+# This function runs evaluation on test dataset.
+# It returns average test loss and testing accuracy.
 @torch.no_grad()
 def evaluate(model, loader, device):
     model.eval()
@@ -68,7 +48,7 @@ def evaluate(model, loader, device):
         f = f.to(device)
         y = y.to(device)
 
-        logits = model(c, f)  # <-- assumes your model forward accepts (c, f)
+        logits = model(c, f)
         loss = criterion(logits, y)
 
         total_loss += float(loss.item()) * y.size(0)
@@ -96,18 +76,18 @@ def main():
 
 
 
-    # ---- Load labels only (for stratification) ----
+    # Load labels
     label_path = os.path.join(args.data_dir, "label.mat")
     label_mat = sio.loadmat(label_path)
-    # class labels -> 0-based
 
+    # Make labels zero-based
     Y = np.squeeze(label_mat["label"]).astype(np.int64) - 1  # shape [N]
 
-    all_subjects = np.arange(1, len(Y)+1)  # subject IDs are 1-based
+    # Get valid subjects
+    all_subjects = np.arange(1, len(Y)+1)
     valid_sids = get_valid_subjects(args.data_dir, all_subjects)
-    #Y_valid = Y[valid_sids - 1] 
 
-    # ---- Stratified split: train (0.70), remaining (0.30) ----
+    #Stratified split: train (0.70), test(0.15), heldout(0.15)
     train_sids, rem_sids = train_test_split(
         valid_sids,
         test_size=0.30,
@@ -116,52 +96,62 @@ def main():
         stratify=Y[valid_sids - 1],  # stratify by class labels
     )
 
-    # ---- Split remaining into test and heldout equally (0.15/0.15 of full) ----
-    # Need labels for rem_sids: label index is sid-1
     rem_labels = Y[rem_sids - 1]
     test_sids, heldout_sids = train_test_split(
         rem_sids,
-        test_size=0.50,  # half of 0.30 -> 0.15
+        test_size=0.50,
         random_state=args.seed,
         shuffle=True,
         stratify=rem_labels,
     )
 
+    # Save Heldout subject IDs
+    # with open('headout_sids.json', "w") as f:
+    #     json.dump(
+    #         [int(s) for s in heldout_sids],
+    #         f,
+    #         indent=2
+    #     )
+    # assert 1==2
     print(f"Split sizes: train={len(train_sids)}, test={len(test_sids)}, heldout={len(heldout_sids)}")
 
-    # ---- Build datasets/loaders ----
+    # Build datasets
     train_ds = AtlasFreeBNTDataset(args.data_dir,Y, train_sids)
     test_ds = AtlasFreeBNTDataset(args.data_dir, Y, test_sids)
     heldout_ds = AtlasFreeBNTDataset(args.data_dir,Y, heldout_sids)
     print("datasets created..")
 
+    # Build dataloaders
     train_loader = DataLoader(
         train_ds, batch_size=args.batch_size, shuffle=True, pin_memory=True)
-    
     test_loader = DataLoader(
         test_ds, batch_size=args.batch_size, shuffle=False, pin_memory=True)
     heldout_loader = DataLoader(
         heldout_ds, batch_size=args.batch_size, shuffle=False, pin_memory=True)
 
-    print("dataloaders created..")
-    # ---- Create model ----
-    # Replace this with your actual import / constructor
 
+    print("dataloaders created..")
+    
+    # Initialize model
     model = AtlasFreeBNT().to(device)
     print("model initialized..")
-    # ---- Train setup ----
+    
+    # Define loss function, optimizer, and scheduler
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-2)
     scheduler = torch.optim.lr_scheduler.StepLR(
                                                 optimizer,
-                                                step_size=2,   # every 2 epochs
-                                                gamma=0.1      # multiply LR by 0.5
+                                                step_size=2,
+                                                gamma=0.1
                                                 )  
 
+    # Initialize meta data
     best_test_acc = -1.0
     lowest_loss = 999999.0
     training_losses = []
     testing_losses = []
+
+    # Training Loop
     print("start training...")
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -175,7 +165,7 @@ def main():
 
             optimizer.zero_grad(set_to_none=True)
 
-            logits = model(c, f)  # <-- assumes forward(c, f) -> [B, num_classes]
+            logits = model(c, f)
             loss = criterion(logits, y)
             loss.backward()
             optimizer.step()
@@ -193,6 +183,7 @@ def main():
         training_losses.append(train_loss)
         testing_losses.append(test_loss)
 
+        # Save the checkpoint with lowest test loss
         if test_loss < lowest_loss:
             best_test_acc = test_acc
             lowest_loss = test_loss
@@ -220,13 +211,14 @@ def main():
         )
         scheduler.step()
 
+    # Log test And training losses
     with open("loss_log.json", "w") as f:
         json.dump({
             "train": training_losses,
             "test": testing_losses
         }, f)
 
-    # ---- Final evaluation on heldout using best checkpoint ----
+    #Final evaluation on heldout using best checkpoint
     ckpt = torch.load("best_checkpoint.pt", map_location=device)
     model.load_state_dict(ckpt["model_state_dict"])
     heldout_loss, heldout_acc = evaluate(model, heldout_loader, device)
